@@ -1,0 +1,256 @@
+---
+title: "iscience2023"
+author: "Javad Nadaf"
+date: "`r doc_date()`"
+abstract: > 
+ . Running seurat clustering on SVZ samples and selecting the NSC-cluster.<br>
+ . Selecting progenitor cells from 2 fetal human brain datasets.<br>
+ . Merging the selected cells from 3 datasets.<br>
+ . Some visualizations
+output:
+  BiocStyle::html_document
+---
+
+
+## libraries
+
+```{r}
+source("functions_seurat.r")
+library(pheatmap)
+library(Seurat)
+library(ggplot2)
+library(ggplot2)
+FINDALLMARKERS <- FALSE #  time consuming, run and save
+```
+
+## SVZ
+
+### Run Seurat
+
+```{r,eval=FALSE}
+counts <- readRDS("counts_SVZ.rds")
+meta.data <- readRDS("meta.data_SVZ.rds")
+svzObj <- RunSeurat(counts = counts,meta.data = meta.data,nPCA = 35, resolution = 0.6)
+```
+
+```{r}
+ElbowPlot(svzObj,ndims = 35)
+JackStrawPlot(svzObj,reduction = "pca",dims = 1:35)
+VlnPlot(svzObj,"percent.ribo")
+VlnPlot(svzObj,"percent.mt")
+```
+
+### doublets predictions from scrublet
+
+```{r}
+pheatmap_w(table(svzObj$scrublet.predicted_doublets,svzObj$clusters_annotated),fontsize_number = 15)
+```
+
+### visualizing some markers
+
+```{r}
+DimPlot(svzObj,label = TRUE)
+TSNEPlot(svzObj, label = TRUE)
+svzObj@reductions$umap <- NULL
+FeaturePlot(svzObj,features = c("PTPRZ1","BCAN"))
+FeaturePlot(svzObj,features = c("SOX4","SOX11"))
+FeaturePlot(svzObj,features = c("FABP7","EGFR"))
+```
+
+### Cell cycle scores
+
+```{r}
+FeaturePlot(svzObj,features = c("G2M.Score"),cols = cols.fp,pt.size=1)
+FeaturePlot(svzObj,features = c("S.Score"),cols = cols.fp,pt.size=1)
+```
+
+### number of cells per samples and clusters
+
+```{r}
+x=as.matrix(table(svzObj$sample,svzObj$res.0.6))
+pheatmap_w(x)
+
+
+x=as.matrix(table(svzObj$sample,svzObj$clusters_annotated))
+pheatmap_w(x)
+
+
+```
+
+### selecting NSC-like cells
+
+```{r fig.height=5, fig.width=14}
+
+idents <- "NSC-like"
+sub1 <- subset(svzObj, idents = idents )
+cells <- WhichCells(svzObj,idents = idents)
+fig1 <- TSNEPlot(svzObj, label = TRUE)
+fig2 <- TSNEPlot(svzObj,cells.highlight =  cells);fig2$data$highlight <-  plyr::mapvalues(fig2$data$highlight,"Group_1","Selected")
+print(fig1+fig2)
+
+if(FINDALLMARKERS){
+  svzMk <- FindAllMarkers(svzObj)
+}
+```
+
+## Fetal (Couturier 2020)
+
+```{r,eval=FALSE}
+counts <- readRDS("counts_Fetal.rds")
+meta.data <- readRDS("meta.data_Fetal.rds")
+meta.data$platform <- "seq10x"
+fetalObj <- RunSeurat(counts = counts,meta.data = meta.data,nPCA = 30, resolution = 0.6)
+```
+
+```{r}
+ElbowPlot(fetalObj,ndims = 30)
+JackStrawPlot(fetalObj,reduction = "pca",dims = 1:30)
+VlnPlot(fetalObj,"percent.ribo")
+VlnPlot(fetalObj,"percent.mt")
+```
+
+```{r}
+DimPlot(fetalObj, label = TRUE)
+FeaturePlot(fetalObj,features = c("G2M.Score"),cols = cols.fp,pt.size=1)
+FeaturePlot(fetalObj,features = c("S.Score"),cols = cols.fp,pt.size=1)
+if(FINDALLMARKERS){
+  fetalMk <- FindAllMarkers(fetalObj)
+}
+```
+
+### selecting RG/progenitor clusters
+
+```{r fig.height=5, fig.width=10}
+idents <- c("RG","RG.Astro.Epend","RG.Astro","OPC")
+sub2 <- subset(fetalObj, idents = idents )
+cells <- WhichCells(fetalObj,idents = idents)
+fig1 <- DimPlot(fetalObj, label = TRUE)
+fig2 <- DimPlot(fetalObj,cells.highlight =  cells);fig2$data$highlight <-  plyr::mapvalues(fig2$data$highlight,"Group_1","Selected")
+print(fig1+fig2)
+```
+
+## Fetal Nowakowski 2017, cells and clusters information
+
+```{r fig.height=14, fig.width=14}
+df=read.delim("sampleinfo_nowak.txt")
+head(df)
+x <- as.matrix(table(df$Name))
+```
+
+### selected clusters
+
+```{r}
+selected_clusters <- c("tRG","RG-div1","oRG","vRG","RG-div2","OPC","Astrocyte","RG-early")
+```
+
+## merging the 3 datasets
+
+### selected SVZ and Fetal clusters
+
+```{r,eval=FALSE}
+counts <- readRDS("counts_sub123.rds")
+meta.data <- readRDS("metadata_sub123.rds")
+```
+
+```{r}
+table(meta.data$platform,meta.data$DataSet)
+table(meta.data$orig.annotation)
+```
+
+### Run Seurat
+
+```{r,eval=FALSE}
+mergedObj <- RunSeurat(counts = counts,meta.data = meta.data,nPCA = 20, resolution = 0.8,vars.to.regress = "platform")
+```
+
+```{r}
+ElbowPlot(mergedObj)
+JackStrawPlot(mergedObj,reduction = "pca",dims = 1:20)
+```
+
+### visualization original annotations
+
+```{r}
+DimPlot(mergedObj,group.by = "orig.annotation",label = TRUE)
+```
+
+### visualization of Seurat clusters
+
+```{r}
+DimPlot(mergedObj, label = TRUE)
+```
+
+### visualizing some markers
+
+```{r fig.height=5, fig.width=14}
+FeaturePlot(mergedObj,features = c("EGFR","OLIG1"))
+FeaturePlot(mergedObj,features = c("CKB","VIM"))
+FeaturePlot(mergedObj,features = c("GFAP","SOX9"))
+```
+
+### add annotation
+
+```{r}
+clusters=c(4,5,7,9)
+names(clusters)=c("npNSC","aRG1","aRG2","opNSC")
+for(i in 1:length(clusters)){
+cells = WhichCells(mergedObj,expression = seurat_clusters == clusters[i] & DataSet=="SVZ")
+mergedObj@meta.data[cells,"annotation"] <- names(clusters)[i]
+}
+```
+
+### visualization of SVZ cells annotations
+
+```{r}
+DimPlot(mergedObj,group.by = "annotation",label = TRUE)
+if(FINDALLMARKERS){
+  mergedMk <- FindAllMarkers(mergedObj)
+}
+```
+
+### number of cells per annotated clusters
+
+```{r}
+x <- as.matrix(table(mergedObj$orig.annotation,mergedObj$seurat_clusters))
+pheatmap_w(x)
+
+x=as.matrix(table(mergedObj$sample,mergedObj$seurat_clusters))
+pheatmap_w(x)
+
+x=as.matrix(table(mergedObj$sample,mergedObj$annotation))
+pheatmap_w(x)
+
+```
+
+### cell cycle scores and plots
+
+```{r}
+FeaturePlot(mergedObj,features = c("G2M.Score"),cols = cols.fp,pt.size=1)
+FeaturePlot(mergedObj,features = c("S.Score"),cols = cols.fp,pt.size=1)
+```
+
+### Ribosomal protein genes are high in eRG and aRG1, with low transcriptome size and similar percentage of mitochondrial genes, within each dataset
+
+```{r}
+VlnPlot(subset(mergedObj,subset = DataSet == "Fetal_N"),"percent.ribo",group.by = "orig.annotation")
+VlnPlot(subset(mergedObj,subset = annotation %in% c("aRG1","aRG2","opNSC","npNSC")),"percent.ribo",group.by = "annotation")
+
+VlnPlot(subset(mergedObj,subset = DataSet == "Fetal_N"),"nFeature_RNA",group.by = "orig.annotation")
+VlnPlot(subset_SVZ(mergedObj),"nFeature_RNA",group.by = "annotation")
+
+VlnPlot(subset(mergedObj,subset = DataSet == "Fetal_N"),"percent.mt",group.by = "orig.annotation")
+VlnPlot(subset(mergedObj,subset = annotation %in% c("aRG1","aRG2","opNSC","npNSC")),"percent.mt",group.by = "annotation")
+```
+
+
+## Markers expression visualization on dotplot (Figure 2C)
+
+```{r fig.height=4, fig.width=14}
+
+genes <- read.delim("data/genes_figure2C.txt")#fig 2C
+DotPlot(svzObj,features = genes,)+theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1,size = 10))
+
+ss <- subset_SVZ(mergedObj)
+DotPlot(ss,features = genes,group.by = "annotation")+theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1,size = 10))
+
+```
